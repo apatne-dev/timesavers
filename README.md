@@ -1,5 +1,6 @@
 # timesavers
 Scripts for saving time
+
 **What does it do?**
 1. Takes a binary and xlsx file name as input.
 2. Gets all dynamic libraries linked with the binary(by running ldd).
