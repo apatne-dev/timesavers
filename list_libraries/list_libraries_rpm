@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+import argparse
+import re
+import subprocess
+import sys
+import xlsxwriter
+
+
+def run_command(command, shell=False):
+    try:
+        op = subprocess.run(command,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            shell=shell)
+        print(op.stdout.decode("UTF-8"))
+        return op.stdout.decode("UTF-8")
+    except subprocess.CalledProcessError as e:
+        print("Could not run {} command".format(command))
+        print(e)
+        sys.exit()
+
+def get_package_info(binary):
+    so_info = {}
+    so_list = get_so_list(binary)
+    for shared_object in so_list:
+        so_name = shared_object[0]
+        so_path = shared_object[1]
+        so_info[so_name] = get_source_lib_info(so_path)
+        so_info[so_name].append(so_name)
+    return so_info
+
+def get_package_name(shared_lib_path):
+    command = ["rpm", "-qf", shared_lib_path]
+    op = run_command(command)
+    so_source_info = re.findall(r'(\S+)', op)
+    if len(so_source_info) == 1:
+        return so_source_info[0]
+    else:
+        return None
+
+def get_source_lib_info(shared_lib_path):
+    key = get_package_name(shared_lib_path)
+    if not key:
+        return ["", "", "", "", "", "", "", ""]
+    command = ["rpm", "-qi", key]
+    op = run_command(command)
+    info_list = [shared_lib_path, key]
+    headers = ["Name", "Version", "License", "URL", "Summary"]
+    for header in headers:
+        info = re.findall(r'{}\s*:\s*([\S\s]+?)\n'.format(header), op)
+        if info:
+            info_list.append(info[0])
+        else:
+            info_list.append("")
+    info_list.append(re.findall(r'Description\s*:\s*([\S\s]+)\n'.format(header), op)[0])
+    return info_list
+
+
+def get_so_list(binary):
+    command = ["ldd", binary]
+    op = run_command(command)
+    so_list = re.findall(r'(lib[\S]+)[\s]*=>[\s](\/\S+)', op)
+    return so_list
+
+def process(binary, target_file):
+    info = get_package_info(binary)
+    workbook = xlsxwriter.Workbook(target_file)
+    worksheet = workbook.add_worksheet()
+    start_row = 3
+    worksheet.write(0, 0, "Shared Object Path")
+    worksheet.write(0, 1, "Source Package")
+    worksheet.write(0, 2, "Package Name")
+    worksheet.write(0, 3, "Version")
+    worksheet.write(0, 4, "License")
+    worksheet.write(0, 5, "URL")
+    worksheet.write(0, 6, "Summary")
+    worksheet.write(0, 7, "Description")
+    worksheet.write(0, 8, "Shared Object")
+    for _, so_info in info.items():
+        for i in range(len(so_info)):
+            worksheet.write(start_row, i, so_info[i])
+        start_row += 1
+    workbook.close()
+    return;
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("binary_name", help="path to the binary file")
+
+    parser.add_argument("worksheet", help="name of xlsx sheet to be generated",
+                default="library", )
+
+    args = parser.parse_args()
+
+    binary = args.binary_name
+    target_file = args.worksheet
+
+    process(binary, target_file)
