@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+import argparse
+import re
+import subprocess
+import sys
+import xlsxwriter
+
+
+def run_command(command, shell=False):
+    try:
+        op = subprocess.run(command,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            shell=shell)
+        print(op.stdout.decode("UTF-8"))
+        return op.stdout.decode("UTF-8")
+    except subprocess.CalledProcessError as e:
+        print("Could not run {} command".format(command))
+        print(e)
+        sys.exit()
+
+def get_package_info(binary):
+    so_info = {}
+    so_list = get_so_list(binary)
+    for shared_object in so_list:
+        so_info[shared_object] = get_source_lib_info(shared_object)
+    return so_info
+
+def get_source_lib_key(shared_lib):
+    command = ["dpkg", "-S", shared_lib]
+    op = run_command(command)
+    so_source_info = re.findall(r'(lib[\S]+:[\S]+):', op)
+    if so_source_info:
+        return so_source_info[0]
+    else:
+        return None
+
+def get_source_lib_info(shared_lib):
+    key = get_source_lib_key(shared_lib)
+    if not key:
+        return ["", "", "", ""]
+    command = ["dpkg", "-s", key]
+    op = run_command(command)
+    info_list = [shared_lib]
+    headers = ["Package", "Source", "Version", "Homepage"]
+    for header in headers:
+        info = re.findall(r'{}:\s(\S+)[\s\S]'.format(header), op)
+        if info:
+            info_list.append(info[0])
+        else:
+            info_list.append("")
+    return info_list
+
+
+def get_so_list(binary):
+    command = ["ldd", binary]
+    op = run_command(command)
+    so_list = re.findall(r'(lib[\S]+)[\s]*=>[\s]', op)
+    return so_list
+
+def process(binary, target_file):
+    info = get_package_info(binary)
+    workbook = xlsxwriter.Workbook(target_file)
+    worksheet = workbook.add_worksheet()
+    start_row = 3
+    worksheet.write(0, 0, "Shared Object")
+    worksheet.write(0, 1, "Library")
+    worksheet.write(0, 2, "Source Package")
+    worksheet.write(0, 3, "Version")
+    worksheet.write(0, 4, "Homepage")
+    for _, so_info in info.items():
+        for i in range(len(so_info)):
+            worksheet.write(start_row, i, so_info[i])
+        start_row += 1
+    workbook.close()
+    return;
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("binary_name", help="path to the binary file")
+
+    parser.add_argument("worksheet", help="name of xlsx sheet to be generated",
+                default="library", )
+
+    args = parser.parse_args()
+
+    binary = args.binary_name
+    target_file = args.worksheet
+
+    process(binary, target_file)
